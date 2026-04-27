@@ -1,0 +1,865 @@
+openapi: 3.0.0
+info:
+  title: AI Code Reviewer API
+  description: |
+    API complète pour l'analyse automatique de code source via Intelligence Artificielle.
+    
+    **Architecture**: Microservices avec API Gateway
+    
+    **Services**:
+    - Auth Service (Port 3001) - Authentification JWT
+    - Code Service (Port 3002) - Gestion des analyses
+    - AI Service (Port 3003) - Analyse OpenAI
+    - Payment Service (Port 3004) - Paiements Stripe
+    
+    **Authentication**: Utiliser le header `Authorization: Bearer <token>`
+  version: 1.0.0
+  contact:
+    name: Support AI Code Reviewer
+    email: support@aicodereviewer.com
+
+servers:
+  - url: http://localhost:3000/api
+    description: Développement local
+  - url: https://api.aicodereviewer.com/api
+    description: Production
+
+tags:
+  - name: Authentification
+    description: Gestion des utilisateurs et tokens JWT
+  - name: Analyse de Code
+    description: Soumission et historique des analyses
+  - name: Intelligence Artificielle
+    description: Analyse directe avec OpenAI
+  - name: Paiement
+    description: Gestion des abonnements Stripe
+  - name: Santé
+    description: Vérification de l'état des services
+
+paths:
+  # ==================== AUTH ====================
+  /auth/register:
+    post:
+      summary: Créer un nouveau compte
+      tags: [Authentification]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, firstName, lastName]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "oumaima.boullam@example.com"
+                password:
+                  type: string
+                  minLength: 8
+                  example: "SecurePass123"
+                  description: "Min 8 caractères, 1 majuscule, 1 minuscule, 1 chiffre"
+                firstName:
+                  type: string
+                  example: "Jean"
+                lastName:
+                  type: string
+                  example: "Dupont"
+      responses:
+        201:
+          description: Utilisateur créé avec succès
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        400:
+          description: Validation échouée ou email déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      summary: Se connecter
+      tags: [Authentification]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "oumaima.boullam@example.com"
+                password:
+                  type: string
+                  example: "SecurePass123"
+      responses:
+        200:
+          description: Connexion réussie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        401:
+          description: Identifiants incorrects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/refresh:
+    post:
+      summary: Renouveler l'access token
+      tags: [Authentification]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+                  description: Refresh token obtenu lors de la connexion
+      responses:
+        200:
+          description: Tokens renouvelés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  tokens:
+                    $ref: '#/components/schemas/TokenPair'
+
+  /auth/logout:
+    post:
+      summary: Se déconnecter
+      tags: [Authentification]
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        200:
+          description: Déconnexion réussie
+
+  /auth/me:
+    get:
+      summary: Récupérer les informations de l'utilisateur connecté
+      tags: [Authentification]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: Informations utilisateur
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+
+  /auth/profile:
+    put:
+      summary: Mettre à jour le profil
+      tags: [Authentification]
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                preferences:
+                  type: object
+      responses:
+        200:
+          description: Profil mis à jour
+
+  # ==================== CODE ====================
+  /code/submit:
+    post:
+      summary: Soumettre du code pour analyse
+      tags: [Analyse de Code]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, language]
+              properties:
+                code:
+                  type: string
+                  minLength: 10
+                  maxLength: 50000
+                  example: "function add(a, b) { return a + b; }"
+                language:
+                  type: string
+                  enum: [javascript, typescript, python, java, go, rust, php, cpp, csharp, ruby, swift, kotlin, sql, html, css, json, yaml, xml, shell, other]
+                  example: "javascript"
+                fileName:
+                  type: string
+                  example: "utils.js"
+                context:
+                  type: string
+                  description: Contexte optionnel pour l'analyse
+      responses:
+        202:
+          description: Analyse acceptée et en cours de traitement
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  analysisId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [pending, processing]
+                  estimatedTime:
+                    type: string
+        403:
+          description: Crédits insuffisants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /code/history:
+    get:
+      summary: Récupérer l'historique des analyses
+      tags: [Analyse de Code]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: language
+          in: query
+          schema:
+            type: string
+      responses:
+        200:
+          description: Liste des analyses
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      analyses:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AnalysisSummary'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+
+  /code/analysis/{id}:
+    get:
+      summary: Récupérer le détail d'une analyse
+      tags: [Analyse de Code]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Détail de l'analyse
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/AnalysisDetail'
+        404:
+          description: Analyse non trouvée
+
+    delete:
+      summary: Supprimer une analyse
+      tags: [Analyse de Code]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Analyse supprimée
+
+  /code/stats:
+    get:
+      summary: Récupérer les statistiques de l'utilisateur
+      tags: [Analyse de Code]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: Statistiques
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStats'
+
+  /code/languages:
+    get:
+      summary: Liste des langages supportés
+      tags: [Analyse de Code]
+      responses:
+        200:
+          description: Liste des langages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        extension:
+                          type: string
+                        icon:
+                          type: string
+
+  # ==================== AI ====================
+  /ai/analyze:
+    post:
+      summary: Analyser du code directement avec OpenAI
+      tags: [Intelligence Artificielle]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, language]
+              properties:
+                code:
+                  type: string
+                language:
+                  type: string
+                context:
+                  type: string
+      responses:
+        200:
+          description: Résultat de l'analyse
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/AnalysisResult'
+
+  /ai/languages:
+    get:
+      summary: Langages supportés par l'IA
+      tags: [Intelligence Artificielle]
+      responses:
+        200:
+          description: Liste des langages
+
+  /ai/health:
+    get:
+      summary: Vérifier l'état du service OpenAI
+      tags: [Intelligence Artificielle, Santé]
+      responses:
+        200:
+          description: Service OK
+        503:
+          description: Service indisponible
+
+  # ==================== PAYMENT ====================
+  /payment/create-checkout:
+    post:
+      summary: Créer une session de paiement Stripe
+      tags: [Paiement]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan:
+                  type: string
+                  enum: [monthly, annual, lifetime]
+                  example: "monthly"
+                successUrl:
+                  type: string
+                  format: uri
+                cancelUrl:
+                  type: string
+                  format: uri
+      responses:
+        200:
+          description: Session créée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      sessionId:
+                        type: string
+                      checkoutUrl:
+                        type: string
+                        format: uri
+
+  /payment/webhook:
+    post:
+      summary: Webhook Stripe (interne)
+      tags: [Paiement]
+      description: Endpoint pour recevoir les événements Stripe. Ne pas appeler directement.
+      responses:
+        200:
+          description: Événement traité
+
+  /payment/subscription:
+    get:
+      summary: Récupérer l'abonnement actuel
+      tags: [Paiement]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: Informations de l'abonnement
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      hasSubscription:
+                        type: boolean
+                      plan:
+                        type: string
+                      status:
+                        type: string
+                      isActive:
+                        type: boolean
+                      currentPeriodEnd:
+                        type: string
+                        format: date-time
+
+  /payment/cancel-subscription:
+    delete:
+      summary: Annuler l'abonnement
+      tags: [Paiement]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: Abonnement annulé
+
+  /payment/invoices:
+    get:
+      summary: Historique des factures
+      tags: [Paiement]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: Liste des factures
+
+  /payment/portal:
+    post:
+      summary: Accéder au portail client Stripe
+      tags: [Paiement]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: URL du portail
+
+  # ==================== HEALTH ====================
+  /health:
+    get:
+      summary: Vérifier l'état de l'API Gateway
+      tags: [Santé]
+      responses:
+        200:
+          description: Service OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  service:
+                    type: string
+                    example: "api-gateway"
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: number
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT obtenu lors de la connexion
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        isPremium:
+          type: boolean
+        creditsRemaining:
+          type: integer
+        premiumEndDate:
+          type: string
+          format: date-time
+          nullable: true
+        preferences:
+          type: object
+          properties:
+            emailNotifications:
+              type: boolean
+            darkMode:
+              type: boolean
+            language:
+              type: string
+
+    TokenPair:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: JWT valide 15 minutes
+        refreshToken:
+          type: string
+          description: JWT valide 7 jours
+        expiresIn:
+          type: integer
+          description: Secondes avant expiration de l'access token
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+        tokens:
+          $ref: '#/components/schemas/TokenPair'
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+    AnalysisSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        language:
+          type: string
+        fileName:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        score:
+          type: number
+          minimum: 0
+          maximum: 10
+        errorsCount:
+          type: integer
+        warningsCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        executionTime:
+          type: number
+
+    AnalysisDetail:
+      type: object
+      properties:
+        _id:
+          type: string
+        userId:
+          type: string
+        code:
+          type: string
+        language:
+          type: string
+        fileName:
+          type: string
+        status:
+          type: string
+        result:
+          $ref: '#/components/schemas/AnalysisResult'
+        executionTime:
+          type: number
+        tokensUsed:
+          type: object
+          properties:
+            input:
+              type: integer
+            output:
+              type: integer
+            total:
+              type: integer
+        creditsUsed:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    AnalysisResult:
+      type: object
+      properties:
+        score:
+          type: number
+          minimum: 0
+          maximum: 10
+        scoreBreakdown:
+          type: object
+          properties:
+            quality:
+              type: number
+            security:
+              type: number
+            performance:
+              type: number
+            readability:
+              type: number
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeIssue'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeIssue'
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeSuggestion'
+        securityIssues:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecurityIssue'
+        summary:
+          type: string
+
+    CodeIssue:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [SYNTAX_ERROR, LOGIC_ERROR, SECURITY, PERFORMANCE, STYLE, BEST_PRACTICE]
+        severity:
+          type: string
+          enum: [CRITICAL, HIGH, MEDIUM, LOW]
+        line:
+          type: integer
+        column:
+          type: integer
+        description:
+          type: string
+        fix:
+          type: string
+
+    CodeSuggestion:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [OPTIMIZATION, READABILITY, MODERNIZATION, REFACTORING, DOCUMENTATION]
+        description:
+          type: string
+        impact:
+          type: string
+        beforeCode:
+          type: string
+        afterCode:
+          type: string
+        explanation:
+          type: string
+
+    SecurityIssue:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        severity:
+          type: string
+          enum: [CRITICAL, HIGH, MEDIUM, LOW]
+        description:
+          type: string
+        line:
+          type: integer
+        recommendation:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    UserStats:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            totalAnalyses:
+              type: integer
+            averageScore:
+              type: number
+            totalErrors:
+              type: integer
+            totalWarnings:
+              type: integer
+            languages:
+              type: array
+              items:
+                type: string
+            languageDistribution:
+              type: array
+              items:
+                type: object
+                properties:
+                  language:
+                    type: string
+                  count:
+                    type: integer
+            recentAnalyses:
+              type: integer
+            creditsRemaining:
+              type: integer
+            isPremium:
+              type: boolean

@@ -1,0 +1,259 @@
+services:
+
+  # ===================================================
+  # RABBITMQ - Message Broker
+  # ===================================================
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: aicodereview-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aicodereview-network
+
+
+  # ===================================================
+  # MONGODB
+  # ===================================================
+  mongodb:
+    image: mongo:6.0-jammy
+    container_name: aicodereview-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:-password}
+      MONGO_INITDB_DATABASE: aicodereview
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aicodereview-network
+
+
+  # ===================================================
+  # AUTH SERVICE
+  # ===================================================
+  auth-service:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    container_name: aicodereview-auth
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-root}:${MONGO_ROOT_PASS:-password}@mongodb:27017/aicodereview?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:-change_me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+    ports:
+      - "3001:3001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./services/auth/src:/app/src
+      - /app/node_modules
+    networks:
+      - aicodereview-network
+    restart: unless-stopped
+
+
+  # ===================================================
+  # CODE SERVICE
+  # ===================================================
+  code-service:
+    build:
+      context: ./services/code
+      dockerfile: Dockerfile
+    container_name: aicodereview-code
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3002
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-root}:${MONGO_ROOT_PASS:-password}@mongodb:27017/aicodereview?authSource=admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      AI_SERVICE_URL: http://ai-service:3003
+      AUTH_SERVICE_URL: http://auth-service:3001
+    ports:
+      - "3002:3002"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    volumes:
+      - ./services/code/src:/app/src
+      - /app/node_modules
+    networks:
+      - aicodereview-network
+    restart: unless-stopped
+
+
+  # ===================================================
+  # AI SERVICE
+  # ===================================================
+  ai-service:
+    build:
+      context: ./services/ai
+      dockerfile: Dockerfile
+    container_name: aicodereview-ai
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3003
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      AI_MODEL: ${AI_MODEL:-mistralai/mistral-7b-instruct-v0.1}
+      AI_FALLBACK_MODEL: ${AI_FALLBACK_MODEL:-openchat/openchat-7b}
+      AI_MAX_TOKENS: ${AI_MAX_TOKENS:-2000}
+      AI_TEMPERATURE: ${AI_TEMPERATURE:-0.3}
+      AI_SITE_URL: ${AI_SITE_URL:-http://localhost:3000}
+      AI_SITE_NAME: ${AI_SITE_NAME:-"AI Code Review App"}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+    ports:
+      - "3003:3003"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./services/ai/src:/app/src
+      - /app/node_modules
+    networks:
+      - aicodereview-network
+    restart: unless-stopped
+
+
+  # ===================================================
+  # PAYMENT SERVICE
+  # ===================================================
+  payment-service:
+    build:
+      context: ./services/payment
+      dockerfile: Dockerfile
+    container_name: aicodereview-payment
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3004
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-root}:${MONGO_ROOT_PASS:-password}@mongodb:27017/aicodereview?authSource=admin
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      AUTH_SERVICE_URL: http://auth-service:3001
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    ports:
+      - "3004:3004"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    volumes:
+      - ./services/payment/src:/app/src
+      - /app/node_modules
+    networks:
+      - aicodereview-network
+    restart: unless-stopped
+
+
+  # ===================================================
+  # API GATEWAY
+  # ===================================================
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    container_name: aicodereview-gateway
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      AUTH_SERVICE_URL: http://auth-service:3001
+      CODE_SERVICE_URL: http://code-service:3002
+      AI_SERVICE_URL: http://ai-service:3003
+      PAYMENT_SERVICE_URL: http://payment-service:3004
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - auth-service
+      - code-service
+      - ai-service
+      - payment-service
+    volumes:
+      - ./services/gateway/src:/app/src
+      - ./services/gateway/swagger.yaml:/app/swagger.yaml
+      - /app/node_modules
+    networks:
+      - aicodereview-network
+    restart: unless-stopped
+
+
+  # ===================================================
+  # FRONTEND
+  # ===================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aicodereview-frontend
+    environment:
+      VITE_API_URL: http://localhost:3000/api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - gateway
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - aicodereview-network
+    command: npm run dev -- --host
+
+
+# =====================================================
+# VOLUMES
+# =====================================================
+volumes:
+  rabbitmq_data:
+    driver: local
+  mongo_data:
+    driver: local
+
+
+# =====================================================
+# NETWORKS (CLEAN VERSION)
+# =====================================================
+networks:
+  aicodereview-network:
+    driver: bridge

@@ -1,0 +1,89 @@
+### Fichier de test pour l'extension "REST Client" (VS Code)
+### Nom du fichier : request.rest
+
+@baseUrl = http://localhost:3000/api
+@email = oumaimaboullam@gmail.com
+@password = password123
+
+##############################################
+### 1. AUTHENTIFICATION
+##############################################
+
+### Inscription d'un nouvel utilisateur
+# @name register
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "firstName": "Oumaima",
+  "lastName": "Boullam",
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### Connexion
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### Capturer le Token pour les requêtes suivantes
+@token = {{login.response.body.data.tokens.accessToken}}
+
+### Vérifier mon profil (Authentification requise)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{token}}
+
+
+##############################################
+### 2. ANALYSE DE CODE (I.A)
+##############################################
+
+### Soumettre un code PHP pour analyse profonde
+# @name submitCode
+POST {{baseUrl}}/code/submit
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "language": "php",
+  "fileName": "test.php",
+  "code": "<?php\n\n$nom = \"Ali\"\necho $age;\nech0 \"Bonjour\";\nif ($nom = \"Ali\") {\n    echo \"Nom correct\";\ninclude(\"file.php\"\n$tab = array(1,2,3;\nfunction test() {\n    echo \"Hello\"\n}\nrequire_once(\"config.php\";\n$sum = add(2,3);\n?>"
+}
+
+### Voir l'historique de mes analyses
+GET {{baseUrl}}/code/history?limit=10
+Authorization: Bearer {{token}}
+
+### Voir les statistiques globales (Nombre d'analyses, score moyen)
+GET {{baseUrl}}/code/stats
+Authorization: Bearer {{token}}
+
+
+##############################################
+### 3. PAIEMENT & ABONNEMENT (STRIPE)
+##############################################
+
+### Créer une session de paiement pour devenir Premium
+# @name createCheckout
+POST {{baseUrl}}/payment/create-checkout
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "plan": "monthly",
+  "successUrl": "http://localhost:5173/payment/success",
+  "cancelUrl": "http://localhost:5173/payment/cancel"
+}
+
+
+##############################################
+### 4. MAINTENANCE & SANTÉ
+##############################################
+
+### Vérifier que l'API Gateway est en ligne
+GET http://localhost:3000/health
